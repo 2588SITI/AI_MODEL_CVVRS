@@ -1,148 +1,164 @@
 import streamlit as st
-import pandas as pd
 import cv2
 import tempfile
-import time
-import datetime
 import os
+import pandas as pd
+from datetime import datetime, timedelta
+import numpy as np
 
-# Set Page Config
-st.set_page_config(page_title="Indian Railways Loco Crew Monitoring", layout="wide")
+# ------------------------------
+# Utility Functions
+# ------------------------------
 
-def mock_ai_analysis(video_path):
+def detect_motion(frame1, frame2):
+    """Detect motion between two frames to decide if train is running."""
+    diff = cv2.absdiff(frame1, frame2)
+    gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5,5), 0)
+    _, thresh = cv2.threshold(blur, 25, 255, cv2.THRESH_BINARY)
+    motion = np.sum(thresh) / 255
+    return motion > 5000  # Threshold tuned for vibration/motion detection
+
+def analyze_frame(frame, timestamp, motion_detected):
     """
-    PLACEHOLDER FOR YOUR ACTUAL AI MODEL.
-    This simulates frame-by-frame analysis every 2 seconds.
-    The dummy data below reflects the image provided by the user.
+    Analyze each frame for the activities and compliance status.
+    This is a mock — in deployment, connect to your trained CV model.
     """
-    # Simulating processing delay
-    progress_bar = st.progress(0)
-    for i in range(100):
-        time.sleep(0.02)
-        progress_bar.progress(i + 1)
-        
-    # Mock extracted data based on the provided frame
-    report_data = {
-        "Loco_ID": "WAG-9 31XXX", # Dummy ID
-        "Date": "08-03-2025",
-        "Start_Time": "12:26:38",
-        "End_Time": "12:28:38",
-        "Condition": "Running",
-        "Analysis_Text": (
-            "During the observation period, the locomotive was detected to be in a RUNNING condition. "
-            "Both LP and ALP are in the correct uniform (Sky Blue Shirt). "
-            "The Loco Pilot (LP) is standing at the Driving Desk and appears alert. "
-            "However, the Assistant Loco Pilot (ALP) is observed sitting and performing writing work in the logbook while the train is in motion, "
-            "which is a violation of operating manuals."
-        ),
-        "Compliance_Table":[
-            {
-                "Timestamp (Video Clock)": "12:26:38",
-                "Timestamp (Video Streaming)": "00:00:00",
-                "Activity Category": "Writing Work",
-                "Compliance Status": "Non-Compliant",
-                "Deviation Description": "ALP is performing writing work while the locomotive is in running condition."
-            },
-            {
-                "Timestamp (Video Clock)": "12:26:45",
-                "Timestamp (Video Streaming)": "00:00:07",
-                "Activity Category": "Alertness",
-                "Compliance Status": "Compliant",
-                "Deviation Description": "LP is alert and monitoring the track ahead from the Driving Desk."
-            }
-        ],
-        "Disciplinary": {
-            "Corrective Measures": "Counseling of ALP at the crew lobby regarding the prohibition of writing work (filling logbooks/diaries) while the locomotive is in motion. Refresher on distraction rules.",
-            "Charge Sheet & Punishment": "Minor Penalty (SF-11) for ALP under DAR norms for negligence of safety protocols during running condition."
-        }
-    }
-    return report_data
-
-def main():
-    st.title("🚆 Indian Railway Locomotive Crew Monitoring Analysis")
-    st.markdown("""
-    **Role:** Expert Video Analyst  
-    **Framework:** Indian Railway Codes, G&SR, Accident Manuals  
-    **Scope:** Conventional & 3-Phase Locomotives (Frame-by-Frame Analysis every 2 seconds)
-    """)
+    # Convert to RGB
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     
-    st.divider()
+    # Placeholder detections (replace with AI detections)
+    activity_category = "Running Condition" if motion_detected else "Stationary Condition"
+    compliance = "Compliant"
+    deviation_desc = ""
+    
+    # Example rule-based detections (can be replaced with ML/YOLO+Pose model)
+    # Detect writing: look for pen/book patterns
+    avg_color = np.mean(rgb, axis=(0,1))
+    if motion_detected:
+        # Simulate that sometimes LP does writing work while train is moving
+        if np.random.rand() < 0.15:
+            compliance = "Non-Compliant"
+            deviation_desc = "Writing while train is running"
+    
+    # Add more rule-based detections such as mobile, nap, distraction using your model later
+    return {
+        "Timestamp (Video Clock)": str(timestamp),
+        "Timestamp (Video Streaming)": f"{timestamp.strftime('%H:%M:%S')}",
+        "Activity Category": activity_category,
+        "Compliance Status": compliance,
+        "Deviation Description": deviation_desc
+    }
 
-    # Layout: Two columns. Left for Video Upload, Right for Feedback.
-    col1, col2 = st.columns([2, 1])
+def generate_report(df):
+    non_compliant = df[df["Compliance Status"]=="Non-Compliant"]
+    total_frames = len(df)
+    total_non_compliant = len(non_compliant)
+    compliance_rate = 100*(1 - total_non_compliant/total_frames)
+    return f"""
+    ## Locomotive Crew Monitoring Analysis Report
 
-    with col1:
-        st.subheader("Upload Loco Cab Video")
-        st.info("Maximum allowed size: 300 MB. Supported formats: MP4, AVI, MOV.")
-        
-        uploaded_video = st.file_uploader("Upload Video File", type=['mp4', 'avi', 'mov'])
-        
-        if uploaded_video is not None:
-            # Save uploaded video to a temporary file for OpenCV processing
-            tfile = tempfile.NamedTemporaryFile(delete=False) 
-            tfile.write(uploaded_video.read())
-            
-            st.video(uploaded_video)
-            
-            if st.button("▶️ Run AI Frame-by-Frame Analysis", type="primary"):
-                with st.spinner("Analyzing frames every 2 seconds using vision models..."):
-                    report = mock_ai_analysis(tfile.name)
-                    st.session_state['report'] = report
-                st.success("Analysis Complete!")
+    **Locomotive ID:** Auto-detected or manual entry  
+    **Date of Recording:** {datetime.now().strftime('%d-%m-%Y')}  
+    **Observation Period:** As per video timestamp  
 
-    with col2:
-        st.subheader("🛠️ AI Feedback & Retraining Loop")
-        st.markdown("If the physical inspection differs from the AI detection, feed the corrected data here to improve the model.")
-        
-        with st.form("feedback_form", clear_on_submit=True):
-            f_time = st.text_input("Timestamp (e.g., 12:26:38)")
-            f_role = st.selectbox("Crew Member",["LP", "ALP", "Both"])
-            f_actual = st.selectbox("Actual Physical Activity",[
-                "Signal Calling", "Alert/Looking Ahead", "Nap/Micro-Sleep", 
-                "Distraction", "Mobile Usage", "Writing Work", 
-                "RS Valve Hand placement", "Exchange Signals", "Horn Operation",
-                "Packing", "Leaving Seat", "Loco Check (Stationary)", 
-                "SA-9 Application", "Reverser Neutral"
-            ])
-            f_comments = st.text_area("Detailed Comments for Model Correction")
-            
-            submitted = st.form_submit_button("Submit Correction Data")
-            if submitted:
-                # In a real app, save this to a database (PostgreSQL, MongoDB) or CSV
-                # For example: pd.DataFrame([[f_time, f_role, f_actual, f_comments]]).to_csv('feedback.csv', mode='a')
-                st.success("Feedback logged! This data will be used for the next AI model retraining cycle.")
+    ---
+    ### Compliance Summary
+    - Total Frames Analyzed: {total_frames}
+    - Non-Compliant Frames: {total_non_compliant}
+    - Compliance Rate: {compliance_rate:.2f}%
 
-    st.divider()
+    ---
+    ### Corrective Measures
+    - Minor: Counseling for writing during running
+    - Major: Disciplinary review if repeated across periods  
 
-    # Display Report if available in session state
-    if 'report' in st.session_state:
-        report = st.session_state['report']
-        
-        st.header("📄 Locomotive Crew Monitoring Analysis Report")
-        
-        # Subheadings
-        st.markdown(f"**Locomotive ID:** `{report['Loco_ID']}`")
-        st.markdown(f"**Date of Recording:** `{report['Date']}`")
-        st.markdown(f"**Observation Period:** `{report['Start_Time']}` to `{report['End_Time']}`")
-        
-        st.subheader("Detailed Analysis")
-        st.write(report['Analysis_Text'])
-        
-        st.subheader("Compliance Summary & Deviation Table")
-        df_compliance = pd.DataFrame(report['Compliance_Table'])
-        
-        # Styling the dataframe to highlight Non-Compliant rows
-        def highlight_non_compliant(row):
-            if row['Compliance Status'] == 'Non-Compliant':
-                return['background-color: #ffcccc; color: #900000'] * len(row)
-            return [''] * len(row)
-            
-        styled_df = df_compliance.style.apply(highlight_non_compliant, axis=1)
-        st.dataframe(styled_df, use_container_width=True)
-        
-        st.subheader("Disciplinary Summary")
-        st.error(f"**Corrective Measures:**\n{report['Disciplinary']['Corrective Measures']}")
-        st.warning(f"**Charge Sheet & Punishment:**\n{report['Disciplinary']['Charge Sheet & Punishment']}")
+    """
+# ------------------------------
+# Streamlit UI
+# ------------------------------
 
-if __name__ == '__main__':
-    main()
+st.set_page_config(page_title="Indian Railway Locomotive Crew Monitoring", layout="wide")
+
+st.title("🚆 Indian Railway Locomotive Crew Monitoring Analysis")
+
+uploaded_video = st.file_uploader("Upload locomotive cab video (Max 300MB)", type=["mp4", "avi", "mov"])
+
+if uploaded_video:
+    tfile = tempfile.NamedTemporaryFile(delete=False)
+    tfile.write(uploaded_video.read())
+    st.video(tfile.name)
+
+    start_btn = st.button("🚀 Run Video Analysis")
+
+    if start_btn:
+        cap = cv2.VideoCapture(tfile.name)
+        frame_rate = int(cap.get(cv2.CAP_PROP_FPS))
+        interval = 2  # seconds
+        df_data = []
+
+        stframe = st.empty()
+        prev_frame = None
+        start_time = datetime(2025,3,8,12,26,38)  # Example extracted timestamp
+        frame_count = 0
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+            if frame_pos % (frame_rate * interval) != 0:
+                continue
+
+            timestamp = start_time + timedelta(seconds=(frame_pos/frame_rate))
+            if prev_frame is not None:
+                motion = detect_motion(prev_frame, frame)
+            else:
+                motion = False
+
+            record = analyze_frame(frame, timestamp, motion)
+            df_data.append(record)
+            prev_frame = frame
+            stframe.image(frame, channels="BGR", caption=f"Analyzing frame at {timestamp.time()}")
+
+        cap.release()
+        df = pd.DataFrame(df_data)
+        st.success("Analysis Completed ✅")
+
+        st.write("### Compliance Summary & Deviation Table")
+        st.dataframe(df)
+
+        report_text = generate_report(df)
+        st.markdown(report_text)
+
+        # Download report
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Compliance Report (CSV)", csv, "compliance_report.csv", "text/csv")
+
+        # Display corrective interface
+        st.subheader("🧠 Feedback / Physical Inspection Correction")
+        st.write("Use this form to correct AI detection misalignments so the model can learn.")
+
+        with st.form("correction_form"):
+            frame_time = st.text_input("Frame Timestamp (e.g., 12:26:38)")
+            correct_activity = st.text_input("Correct Activity Category")
+            correct_status = st.selectbox("Correct Compliance", ["Compliant", "Non-Compliant"])
+            remarks = st.text_area("Remarks for future model improvement")
+            submit_btn = st.form_submit_button("Submit Correction")
+
+            if submit_btn:
+                correction_data = {
+                    "Frame_Timestamp": frame_time,
+                    "Correct_Activity": correct_activity,
+                    "Correct_Compliance": correct_status,
+                    "Remarks": remarks,
+                    "Recorded_At": str(datetime.now())
+                }
+                # Store corrections for retraining
+                if not os.path.exists("corrections.csv"):
+                    pd.DataFrame([correction_data]).to_csv("corrections.csv", index=False)
+                else:
+                    df_corr = pd.read_csv("corrections.csv")
+                    df_corr = df_corr.append(correction_data, ignore_index=True)
+                    df_corr.to_csv("corrections.csv", index=False)
+                st.success("Correction saved successfully.")
